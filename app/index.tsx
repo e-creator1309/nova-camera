@@ -277,6 +277,23 @@ function ShutterButton({
 }
 
 // ─── Viewfinder dimensions ────────────────────────────────────────────────────
+// ─── Zoom helpers ─────────────────────────────────────────────────────────────
+function getZoomDisplay(z: number): string {
+  if (z <= 0.001) return "0.5×";
+  if (z <= 0.01) return `${(0.5 + (z / 0.01) * 0.5).toFixed(1)}×`;
+  if (z <= 0.45) return `${(1 + ((z - 0.01) / 0.44) * 2).toFixed(1)}×`;
+  if (z <= 0.75) return `${(3 + ((z - 0.45) / 0.30) * 2).toFixed(1)}×`;
+  return `${(5 + ((z - 0.75) / 0.25) * 5).toFixed(1)}×`;
+}
+
+function ZoomLabel({ opacity, scale, text }: { opacity: Animated.Value; scale: Animated.Value; text: string }) {
+  return (
+    <Animated.View style={[styles.zoomLabelWrap, { opacity, transform: [{ scale }] }]}>
+      <Text style={styles.zoomLabelText}>{text}</Text>
+    </Animated.View>
+  );
+}
+
 function getViewfinderDims(ar: AspectRatio): { width: number; height: number | undefined } {
   switch (ar) {
     case "9:16":
@@ -321,6 +338,13 @@ export default function CameraScreen() {
 
   // Pinch zoom
   const pinchRef = useRef({ dist: 0, baseZoom: zoom });
+  const lastHapticZone = useRef(1);
+
+  // Zoom label animation
+  const zoomLabelOpacity = useRef(new Animated.Value(0)).current;
+  const zoomLabelScale = useRef(new Animated.Value(0.7)).current;
+  const [zoomDisplay, setZoomDisplay] = useState("1×");
+  const zoomHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const bottomPad = Platform.OS === "web" ? 34 : insets.bottom;
@@ -339,6 +363,21 @@ export default function CameraScreen() {
       if (assets.length > 0) setLatestPhoto(assets[0].uri);
     } catch {}
   };
+
+  // ── Show zoom label ────────────────────────────────────────────────────────
+  const showZoomLabel = useCallback((z: number) => {
+    setZoomDisplay(getZoomDisplay(z));
+    Animated.parallel([
+      Animated.spring(zoomLabelScale, { toValue: 1, useNativeDriver: true, tension: 220, friction: 10 }),
+      Animated.timing(zoomLabelOpacity, { toValue: 1, duration: 80, useNativeDriver: true }),
+    ]).start();
+    if (zoomHideTimer.current) clearTimeout(zoomHideTimer.current);
+    zoomHideTimer.current = setTimeout(() => {
+      Animated.timing(zoomLabelOpacity, { toValue: 0, duration: 350, useNativeDriver: true }).start(() => {
+        zoomLabelScale.setValue(0.7);
+      });
+    }, 1400);
+  }, [zoomLabelOpacity, zoomLabelScale]);
 
   // ── Pinch-to-zoom ──────────────────────────────────────────────────────────
   const pinchPan = useMemo(
@@ -363,18 +402,22 @@ export default function CameraScreen() {
             const dx = t[0].pageX - t[1].pageX;
             const dy = t[0].pageY - t[1].pageY;
             const newDist = Math.sqrt(dx * dx + dy * dy);
-            const scale = newDist / pinchRef.current.dist;
-            const newZoom = Math.max(0, Math.min(1, pinchRef.current.baseZoom * scale));
+            const rawScale = newDist / pinchRef.current.dist;
+            const newZoom = Math.max(0, Math.min(1, pinchRef.current.baseZoom * rawScale));
             setZoom(newZoom);
-            // sync zoom pill selection
-            if (newZoom <= 0.001) setZoomIndex(0);
-            else if (newZoom < 0.25) setZoomIndex(1);
-            else if (newZoom < 0.6) setZoomIndex(2);
-            else setZoomIndex(3);
+            showZoomLabel(newZoom);
+            // sync zoom pill
+            const zone = newZoom <= 0.001 ? 0 : newZoom < 0.25 ? 1 : newZoom < 0.6 ? 2 : 3;
+            setZoomIndex(zone);
+            // haptic tick when crossing zone boundary
+            if (zone !== lastHapticZone.current) {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              lastHapticZone.current = zone;
+            }
           }
         },
       }),
-    [zoom]
+    [zoom, showZoomLabel]
   );
 
   // ── Tap-to-focus ───────────────────────────────────────────────────────────
@@ -402,7 +445,9 @@ export default function CameraScreen() {
   // ── Zoom pill ──────────────────────────────────────────────────────────────
   const handleZoomPill = (i: number) => {
     setZoomIndex(i);
-    setZoom(ZOOM_LEVELS[i].value);
+    const v = ZOOM_LEVELS[i].value;
+    setZoom(v);
+    showZoomLabel(v);
     Haptics.selectionAsync();
   };
 
@@ -538,6 +583,9 @@ export default function CameraScreen() {
         ) : (
           <View style={[StyleSheet.absoluteFill, { backgroundColor: "#111" }]} />
         )}
+
+        {/* Zoom label overlay */}
+        <ZoomLabel opacity={zoomLabelOpacity} scale={zoomLabelScale} text={zoomDisplay} />
 
         {/* Tap focus overlay */}
         <FocusOverlay
@@ -750,6 +798,20 @@ const styles = StyleSheet.create({
   brightnessRow: { flexDirection: "row", alignItems: "center", marginTop: 10, gap: 6 },
   brightnessTrack: { width: 120, height: 2, backgroundColor: "rgba(255,255,255,0.4)", borderRadius: 1, position: "relative" },
   brightnessDot: { position: "absolute", top: -5, width: 12, height: 12, borderRadius: 6, backgroundColor: "#fff", marginLeft: -6 },
+
+  // Zoom label
+  zoomLabelWrap: {
+    position: "absolute",
+    alignSelf: "center",
+    top: "42%",
+    backgroundColor: "rgba(0,0,0,0.52)",
+    borderRadius: 22,
+    paddingHorizontal: 20,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  zoomLabelText: { color: "#fff", fontSize: 20, fontWeight: "700", letterSpacing: 0.5 },
 
   // Recording badge
   recBadge: { position: "absolute", left: 0, right: 0, alignItems: "center", flexDirection: "row", justifyContent: "center", gap: 6 },
