@@ -22,11 +22,10 @@ jobs:
       - name: 🟢 Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # Updated to 22 (current LTS) to avoid Node 20 deprecation
           node-version: '22'
           cache: 'pnpm'
-          # Points to the actual location of your lockfile
-          cache-dependency-path: 'artifacts/camera-app/pnpm-lock.yaml'
+          # استخدام النجمة المزدوجة للبحث عن الملف في المجلدات الفرعية
+          cache-dependency-path: '**/pnpm-lock.yaml'
 
       - name: ☕ Setup Java 17
         uses: actions/setup-java@v4
@@ -38,7 +37,6 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: 📥 Install dependencies
-        # Added working-directory to execute pnpm in the correct folder
         working-directory: artifacts/camera-app
         run: pnpm install
 
