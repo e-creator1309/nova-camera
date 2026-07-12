@@ -25,13 +25,8 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: 🤖 Setup Android SDK + NDK
+      - name: 🤖 Setup Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: 📦 Install NDK & CMake
-        run: |
-          sdkmanager --install "ndk;27.1.12297006" "cmake;3.22.1" 2>/dev/null || true
-          echo "NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> $GITHUB_ENV
 
       - name: 📥 Install dependencies
         run: npm install --legacy-peer-deps
@@ -54,19 +49,21 @@ jobs:
             --no-daemon \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m" \
             2>&1 | tee /tmp/gradle.log
-          echo "gradle_exit=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
-      - name: 📋 Write Gradle output to Summary
+      - name: 📋 Show last 200 lines in Job Summary
         if: always()
         run: |
-          echo "## Gradle Build Log" >> $GITHUB_STEP_SUMMARY
+          echo "## Gradle Output (last 200 lines)" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          tail -200 /tmp/gradle.log | grep -E "(FAILURE|error:|Error|Exception|BUILD|Caused by|Could not|> Task|warning:)" | tail -80 >> $GITHUB_STEP_SUMMARY || true
+          tail -200 /tmp/gradle.log >> $GITHUB_STEP_SUMMARY || echo "no log" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: ❌ Fail if Gradle failed
-        if: steps.gradle.outputs.gradle_exit != '0'
-        run: exit 1
+        if: steps.gradle.outputs.exit_code != '0'
+        run: |
+          echo "Gradle exit: ${{ steps.gradle.outputs.exit_code }}"
+          exit 1
 
       - name: 📤 Upload APK
         uses: actions/upload-artifact@v4
