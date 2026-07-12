@@ -31,7 +31,7 @@ jobs:
       - name: 📥 Install dependencies
         run: npm install --legacy-peer-deps
 
-      - name: 🔨 Expo Prebuild (generate native Android project)
+      - name: 🔨 Expo Prebuild
         run: npx expo prebuild --platform android --no-install
         env:
           EXPO_NO_DOTENV: 1
@@ -42,9 +42,25 @@ jobs:
 
       - name: 🏗️ Build Debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon -Dorg.gradle.jvmargs="-Xmx4g"
+        run: |
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --stacktrace \
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m" \
+            2>&1 | tee /tmp/gradle-build.log
+          # Exit with gradle's exit code
+          exit ${PIPESTATUS[0]}
+
+      - name: 📋 Upload Gradle log (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: /tmp/gradle-build.log
+          retention-days: 7
 
       - name: 📤 Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: nova-camera-debug
@@ -52,6 +68,5 @@ jobs:
           retention-days: 30
 
       - name: ✅ Print APK size
-        run: |
-          APK="android/app/build/outputs/apk/debug/app-debug.apk"
-          echo "✅ APK ready: $(du -h $APK | cut -f1)"
+        if: success()
+        run: echo "✅ APK: $(du -h android/app/build/outputs/apk/debug/app-debug.apk | cut -f1)"
